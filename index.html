@@ -1,0 +1,881 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>NovaPOS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<style>
+  :root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; font-family: Inter, system-ui, -apple-system, sans-serif; background: #070b16; color: #e2e8f0; overflow-x: hidden; }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  .glass { background: rgba(255,255,255,.05); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,.09); box-shadow: 0 10px 40px -12px rgba(0,0,0,.6); }
+  .hover-lift { transition: transform .25s, box-shadow .25s, border-color .25s; }
+  .hover-lift:hover { transform: translateY(-3px); border-color: rgba(129,140,248,.45); box-shadow: 0 18px 40px -14px rgba(99,102,241,.45); }
+  .press { transition: transform .12s ease; }
+  .press:active { transform: scale(.95); }
+  .ripple { position: absolute; border-radius: 9999px; background: rgba(255,255,255,.4); width: 120px; height: 120px; left: 50%; top: 50%; transform: translate(-50%,-50%) scale(0); animation: rip .6s ease-out forwards; pointer-events: none; }
+  @keyframes rip { to { transform: translate(-50%,-50%) scale(3); opacity: 0; } }
+  .fade-up { animation: fadeUp .45s ease backwards; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .modal-in { animation: modalIn .25s ease backwards; }
+  @keyframes modalIn { from { opacity: 0; transform: scale(.94) translateY(8px); } to { opacity: 1; transform: none; } }
+  .pop { animation: pop .5s cubic-bezier(.2,1.4,.4,1) both; }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .grow { transform-origin: bottom; animation: grow .8s cubic-bezier(.2,.8,.2,1) both; }
+  @keyframes grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+  .blob { position: fixed; border-radius: 9999px; filter: blur(90px); opacity: .35; pointer-events: none; z-index: 0; }
+  .glow-active { box-shadow: 0 0 22px -2px rgba(99,102,241,.7); }
+  .grad-text { background: linear-gradient(90deg,#a5b4fc,#6ee7b7,#fcd34d); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 9px; }
+  .scroll-thin { scrollbar-width: thin; }
+  @media print {
+    body { background: #fff; }
+    body * { visibility: hidden; }
+    .print-area, .print-area * { visibility: visible; }
+    .print-area { position: absolute; left: 0; top: 0; width: 80mm; padding: 4mm; background: #fff; color: #000; border: none !important; }
+    .print-area * { color: #000 !important; background: transparent !important; box-shadow: none !important; backdrop-filter: none !important; border-color: #999 !important; }
+    .no-print { display: none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="root"><div id="loader" style="padding:40px;font-family:Inter,system-ui,sans-serif;color:#c7d2fe">Loading NovaPOS…</div></div>
+<script>
+  window.addEventListener('error', function (e) {
+    var r = document.getElementById('root');
+    if (r) r.innerHTML = '<pre style="padding:24px;white-space:pre-wrap;color:#fda4af;font:13px monospace">NovaPOS error: ' + (e.message || 'unknown error') + '</pre>';
+  });
+  setTimeout(function () {
+    var l = document.getElementById('loader');
+    if (l) l.textContent = 'NovaPOS could not start. The React, Babel or Lucide scripts did not load. Check network access to cdnjs.cloudflare.com, cdn.jsdelivr.net and cdn.tailwindcss.com.';
+  }, 6000);
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo } = React;
+
+/* ---------- Constants & data ---------- */
+const TAX_RATE = 0.08;
+const LOW_STOCK = 5;
+const CATEGORIES = ['All', 'Beverages', 'Bakery', 'Tech', 'Snacks'];
+const CAT_GRAD = {
+  Beverages: 'from-indigo-500 to-violet-500',
+  Bakery: 'from-amber-400 to-orange-500',
+  Tech: 'from-cyan-400 to-blue-600',
+  Snacks: 'from-emerald-400 to-teal-600'
+};
+const ICON_OPTIONS = ['Package','Coffee','Leaf','GlassWater','CupSoda','Croissant','Wheat','Cake','Cookie','Headphones','Plug','Watch','Smartphone','Popcorn','Candy','Nut'];
+const KEYS = { products: 'novapos.v1.products', sales: 'novapos.v1.sales', moves: 'novapos.v1.movements' };
+
+const SEED_PRODUCTS = [
+  { id: 'p01', sku: 'BEV-001', name: 'Cold Brew Coffee', category: 'Beverages', price: 4.5, stock: 40, icon: 'Coffee', badge: 'Bestseller' },
+  { id: 'p02', sku: 'BEV-002', name: 'Matcha Latte', category: 'Beverages', price: 5.25, stock: 25, icon: 'Leaf', badge: 'New' },
+  { id: 'p03', sku: 'BEV-003', name: 'Sparkling Lemonade', category: 'Beverages', price: 3, stock: 3, icon: 'GlassWater', badge: '' },
+  { id: 'p04', sku: 'BEV-004', name: 'Fresh Orange Juice', category: 'Beverages', price: 3.75, stock: 18, icon: 'CupSoda', badge: '' },
+  { id: 'p05', sku: 'BAK-001', name: 'Butter Croissant', category: 'Bakery', price: 3.25, stock: 30, icon: 'Croissant', badge: 'Fresh' },
+  { id: 'p06', sku: 'BAK-002', name: 'Sourdough Loaf', category: 'Bakery', price: 6, stock: 12, icon: 'Wheat', badge: '' },
+  { id: 'p07', sku: 'BAK-003', name: 'Blueberry Muffin', category: 'Bakery', price: 2.75, stock: 4, icon: 'Cake', badge: '' },
+  { id: 'p08', sku: 'BAK-004', name: 'Choc Chip Cookie', category: 'Bakery', price: 2.5, stock: 22, icon: 'Cookie', badge: '' },
+  { id: 'p09', sku: 'TEC-001', name: 'Wireless Earbuds', category: 'Tech', price: 59.99, stock: 8, icon: 'Headphones', badge: 'Hot' },
+  { id: 'p10', sku: 'TEC-002', name: '30W USB-C Charger', category: 'Tech', price: 24.99, stock: 15, icon: 'Plug', badge: '' },
+  { id: 'p11', sku: 'TEC-003', name: 'Smartwatch Band', category: 'Tech', price: 19.5, stock: 2, icon: 'Watch', badge: '' },
+  { id: 'p12', sku: 'TEC-004', name: 'Phone Stand', category: 'Tech', price: 14, stock: 0, icon: 'Smartphone', badge: '' },
+  { id: 'p13', sku: 'SNK-001', name: 'Sea Salt Popcorn', category: 'Snacks', price: 2.99, stock: 35, icon: 'Popcorn', badge: '' },
+  { id: 'p14', sku: 'SNK-002', name: 'Dark Chocolate Bar', category: 'Snacks', price: 3.49, stock: 20, icon: 'Candy', badge: 'Vegan' },
+  { id: 'p15', sku: 'SNK-003', name: 'Trail Mix Pack', category: 'Snacks', price: 4.25, stock: 14, icon: 'Nut', badge: '' }
+];
+
+/* ---------- Helpers ---------- */
+const r2 = n => Math.round(n * 100) / 100;
+const money = n => '$' + (Number(n) || 0).toFixed(2);
+const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36);
+const loadKey = (k, fb) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fb; } catch (e) { return fb; } };
+const saveKey = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+const mk = (product, sku, delta, reason) => ({ id: uid(), date: new Date().toISOString(), product, sku, delta, reason });
+const totalsFor = (items, pct) => {
+  const subtotal = r2(items.reduce((s, i) => s + i.price * i.qty, 0));
+  const discount = r2(subtotal * pct / 100);
+  const tax = r2((subtotal - discount) * TAX_RATE);
+  const total = r2(subtotal - discount + tax);
+  return { subtotal, discount, tax, total };
+};
+const stockTone = s => s === 0 ? 'red' : s <= LOW_STOCK ? 'amber' : 'green';
+const stockLabel = s => s === 0 ? 'Out of stock' : s <= LOW_STOCK ? 'Low stock' : 'In stock';
+
+function seedSales() {
+  let s = 7;
+  const rnd = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+  const now = Date.now();
+  const out = [];
+  for (let d = 6; d >= 0; d--) {
+    const n = 3 + Math.floor(rnd() * 4);
+    for (let k = 0; k < n; k++) {
+      const items = [];
+      const picks = 1 + Math.floor(rnd() * 3);
+      for (let j = 0; j < picks; j++) {
+        const p = SEED_PRODUCTS[Math.floor(rnd() * SEED_PRODUCTS.length)];
+        if (items.some(i => i.id === p.id)) continue;
+        items.push({ id: p.id, name: p.name, sku: p.sku, price: p.price, qty: 1 + Math.floor(rnd() * 3) });
+      }
+      const discountPct = rnd() < 0.2 ? 10 : 0;
+      const date = new Date(now - d * 86400000 - Math.floor(rnd() * 10 * 3600000) - 3600000).toISOString();
+      out.push({ id: uid(), date, items, discountPct, payment: rnd() < 0.6 ? 'Card' : 'Cash', ...totalsFor(items, discountPct) });
+    }
+  }
+  out.sort((a, b) => b.date.localeCompare(a.date));
+  return out.map((sale, i, arr) => ({ ...sale, invoiceNo: 'NV-' + (1001 + arr.length - 1 - i) }));
+}
+
+/* ---------- Safe data helpers ---------- */
+const asArr = (v, fb) => (Array.isArray(v) ? v : fb);
+const toNodes = node => (Array.isArray(node) ? node : []).map(el => {
+  if (Array.isArray(el)) return { tag: el[0], attrs: el[1] || {} };
+  if (el && typeof el === 'object') return { tag: el.tag || el[0], attrs: el.attrs || el[1] || {} };
+  return null;
+}).filter(x => x && typeof x.tag === 'string');
+
+/* ---------- UI primitives ---------- */
+const Icon = ({ name, size = 18, className = '' }) => {
+  const node = window.lucide && window.lucide.icons && window.lucide.icons[name];
+  if (!Array.isArray(node)) return <span className={'inline-block ' + className} style={{ width: size, height: size }} />;
+  return React.createElement('svg', {
+    width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+    strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', className, 'aria-hidden': 'true'
+  }, toNodes(node).map((el, i) => React.createElement(el.tag, { ...el.attrs, key: i })));
+};
+
+const Pill = ({ tone, children }) => {
+  const t = {
+    green: 'bg-emerald-500/15 text-emerald-300 ring-emerald-400/30',
+    amber: 'bg-amber-500/15 text-amber-300 ring-amber-400/30',
+    red: 'bg-rose-500/15 text-rose-300 ring-rose-400/30',
+    indigo: 'bg-indigo-500/15 text-indigo-300 ring-indigo-400/30',
+    slate: 'bg-white/10 text-slate-300 ring-white/15'
+  }[tone];
+  return <span className={'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ring-1 whitespace-nowrap ' + t}>{children}</span>;
+};
+
+const Tile = ({ icon, cat, small }) => (
+  <div className={'grid place-items-center rounded-xl bg-gradient-to-br shadow-lg text-white shrink-0 ' + (CAT_GRAD[cat] || 'from-slate-500 to-slate-700') + (small ? ' w-9 h-9' : ' w-12 h-12')}>
+    <Icon name={icon} size={small ? 16 : 22} />
+  </div>
+);
+
+const Modal = ({ onClose, children, width = 'max-w-md' }) => (
+  <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className={'modal-in glass rounded-2xl w-full ' + width + ' max-h-[90vh] overflow-y-auto scroll-thin'} onClick={e => e.stopPropagation()}>
+      {children}
+    </div>
+  </div>
+);
+
+function CountUp({ value, prefix = '', decimals = 0 }) {
+  const [v, setV] = useState(0);
+  useEffect(() => {
+    let raf;
+    const start = performance.now();
+    const dur = 900;
+    const tick = t => {
+      const k = Math.min(1, (t - start) / dur);
+      const e = 1 - Math.pow(1 - k, 3);
+      setV(value * e);
+      if (k < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+  return <>{prefix}{v.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}</>;
+}
+
+const inp = 'w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30 transition placeholder:text-slate-500';
+const btnPrimary = 'px-4 py-2.5 rounded-xl font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 shadow-lg shadow-indigo-500/30 hover:brightness-110 press disabled:opacity-40 disabled:pointer-events-none';
+const btnIcon = 'p-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 press transition';
+
+/* ---------- Sidebar ---------- */
+function Sidebar({ view, setView }) {
+  const items = [
+    { id: 'pos', label: 'POS Terminal', icon: 'ShoppingCart' },
+    { id: 'analytics', label: 'Analytics', icon: 'LayoutDashboard' },
+    { id: 'inventory', label: 'Inventory', icon: 'Boxes' },
+    { id: 'history', label: 'Sales & Invoices', icon: 'Receipt' }
+  ];
+  return (
+    <aside className="relative z-20 md:w-64 md:sticky md:top-0 md:h-screen flex md:flex-col gap-4 md:gap-6 p-4 md:p-5 bg-gradient-to-b from-slate-950 via-slate-950 to-indigo-950/60 border-b md:border-b-0 md:border-r border-white/5">
+      <div className="flex items-center gap-3 px-2">
+        <div className="w-10 h-10 rounded-xl grid place-items-center bg-gradient-to-br from-indigo-500 via-violet-500 to-emerald-400 shadow-lg shadow-indigo-500/40">
+          <Icon name="Zap" size={20} className="text-white" />
+        </div>
+        <div>
+          <div className="font-extrabold text-lg tracking-tight">NovaPOS</div>
+          <div className="text-[11px] text-slate-400 uppercase tracking-[0.2em]">Commerce Suite</div>
+        </div>
+      </div>
+      <nav className="flex md:flex-col gap-1.5 overflow-x-auto md:overflow-visible scroll-thin pb-1">
+        {items.map(it => {
+          const on = view === it.id;
+          return (
+            <button key={it.id} onClick={() => setView(it.id)}
+              className={'flex items-center gap-3 whitespace-nowrap px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 press ' +
+                (on ? 'text-white bg-gradient-to-r from-indigo-500/35 to-violet-500/10 ring-1 ring-indigo-400/40 glow-active'
+                    : 'text-slate-400 hover:text-white hover:bg-white/5')}>
+              <Icon name={it.icon} size={18} className={on ? 'text-indigo-300' : ''} />
+              {it.label}
+              {on && <span className="ml-auto hidden md:block w-1.5 h-1.5 rounded-full bg-indigo-300 shadow-[0_0_10px_#a5b4fc]" />}
+            </button>
+          );
+        })}
+      </nav>
+      <div className="hidden md:block mt-auto glass rounded-2xl p-4">
+        <div className="text-xs text-slate-400">Store status</div>
+        <div className="flex items-center gap-2 mt-1 text-sm font-semibold text-emerald-300">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />Online · Saved locally
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+/* ---------- POS ---------- */
+function ProductCard({ p, inCart, onAdd, index }) {
+  const [rip, setRip] = useState(0);
+  const none = p.stock === 0;
+  return (
+    <button disabled={none}
+      onClick={() => { setRip(Date.now()); onAdd(); }}
+      className="relative overflow-hidden text-left glass rounded-2xl p-4 hover-lift press fade-up disabled:opacity-40 disabled:cursor-not-allowed"
+      style={{ animationDelay: (index * 30) + 'ms' }}>
+      {rip > 0 && <span key={rip} className="ripple" />}
+      <div className="flex items-start justify-between mb-3">
+        <Tile icon={p.icon} cat={p.category} />
+        {p.badge && <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md bg-white/10 text-amber-200">{p.badge}</span>}
+      </div>
+      <div className="font-semibold text-slate-100 leading-tight truncate">{p.name}</div>
+      <div className="text-[11px] text-slate-500 mono mb-3">{p.sku}</div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-lg font-extrabold text-white">{money(p.price)}</span>
+        <Pill tone={stockTone(p.stock)}>{none ? 'Sold out' : p.stock + ' left'}</Pill>
+      </div>
+      {inCart > 0 && <div className="mt-2 text-[11px] text-indigo-300 font-semibold">{inCart} in cart</div>}
+    </button>
+  );
+}
+
+function POS({ products, onCheckout }) {
+  const [cat, setCat] = useState('All');
+  const [q, setQ] = useState('');
+  const [cart, setCart] = useState({});
+  const [discIn, setDiscIn] = useState('0');
+  const [pay, setPay] = useState('Cash');
+
+  const shown = useMemo(() => products.filter(p =>
+    (cat === 'All' || p.category === cat) &&
+    (!q || (p.name + ' ' + p.sku).toLowerCase().includes(q.toLowerCase()))
+  ), [products, cat, q]);
+
+  const lines = products.filter(p => cart[p.id] > 0).map(p => ({ p, qty: cart[p.id] }));
+  const disc = Math.min(100, Math.max(0, parseFloat(discIn) || 0));
+  const tot = totalsFor(lines.map(({ p, qty }) => ({ price: p.price, qty })), disc);
+  const count = lines.reduce((s, l) => s + l.qty, 0);
+
+  const add = p => setCart(c => {
+    const cur = c[p.id] || 0;
+    if (cur >= p.stock) return c;
+    return { ...c, [p.id]: cur + 1 };
+  });
+  const change = (p, d) => setCart(c => {
+    const n = (c[p.id] || 0) + d;
+    if (n > p.stock) return c;
+    const nc = { ...c };
+    if (n <= 0) delete nc[p.id]; else nc[p.id] = n;
+    return nc;
+  });
+  const remove = id => setCart(c => { const nc = { ...c }; delete nc[id]; return nc; });
+
+  const checkout = () => {
+    if (!lines.length) return;
+    onCheckout({
+      items: lines.map(({ p, qty }) => ({ id: p.id, name: p.name, sku: p.sku, price: p.price, qty })),
+      discountPct: disc, payment: pay, totals: tot
+    });
+    setCart({});
+    setDiscIn('0');
+  };
+
+  return (
+    <div className="grid xl:grid-cols-[1fr_390px] gap-6">
+      <section className="min-w-0">
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-5">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">Point of <span className="grad-text">Sale</span></h1>
+            <p className="text-sm text-slate-400">Tap a product to add it to the order.</p>
+          </div>
+          <div className="relative w-full sm:w-72">
+            <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name or SKU" className={inp + ' pl-9'} />
+          </div>
+        </div>
+        <div className="flex gap-2 overflow-x-auto scroll-thin pb-1">
+          {CATEGORIES.map(c => (
+            <button key={c} onClick={() => setCat(c)}
+              className={'px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition-all duration-300 press ' +
+                (cat === c ? 'text-white bg-gradient-to-r from-indigo-500 to-violet-500 shadow-lg shadow-indigo-500/30 scale-105'
+                           : 'text-slate-300 bg-white/5 hover:bg-white/10 border border-white/10')}>
+              {c}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-4 gap-4 mt-5">
+          {shown.map((p, i) => (
+            <ProductCard key={p.id} p={p} index={i} inCart={cart[p.id] || 0} onAdd={() => add(p)} />
+          ))}
+        </div>
+        {shown.length === 0 && <div className="glass rounded-2xl p-10 text-center text-slate-400 mt-5">No products match your search.</div>}
+      </section>
+
+      <aside className="glass rounded-2xl p-5 flex flex-col xl:sticky xl:top-6 xl:self-start xl:max-h-[calc(100vh-3rem)]">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-bold text-lg flex items-center gap-2"><Icon name="ShoppingCart" size={18} className="text-indigo-300" />Current Order</h2>
+          <Pill tone="indigo">{count} item{count === 1 ? '' : 's'}</Pill>
+        </div>
+        <div className="flex-1 overflow-y-auto scroll-thin space-y-2.5 pr-1 min-h-[120px]">
+          {lines.length === 0 && (
+            <div className="text-center text-slate-500 py-10">
+              <Icon name="ShoppingCart" size={34} className="mx-auto mb-2 opacity-50" />
+              Cart is empty
+            </div>
+          )}
+          {lines.map(({ p, qty }) => (
+            <div key={p.id} className="fade-up flex items-center gap-3 p-2.5 rounded-xl bg-white/[0.04] border border-white/5">
+              <Tile icon={p.icon} cat={p.category} small />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold truncate">{p.name}</div>
+                <div className="text-xs text-slate-400">{money(p.price)} each</div>
+              </div>
+              <div className="flex items-center gap-1 bg-black/30 rounded-lg p-1">
+                <button onClick={() => change(p, -1)} className={btnIcon + ' !p-1'}><Icon name="Minus" size={14} /></button>
+                <span className="w-7 text-center font-bold text-sm">{qty}</span>
+                <button disabled={qty >= p.stock} title={qty >= p.stock ? 'Max stock reached' : 'Add one'}
+                  onClick={() => change(p, 1)} className={btnIcon + ' !p-1 disabled:opacity-30 disabled:pointer-events-none'}>
+                  <Icon name="Plus" size={14} />
+                </button>
+              </div>
+              <div className="w-16 text-right text-sm font-bold">{money(p.price * qty)}</div>
+              <button onClick={() => remove(p.id)} className="text-rose-400 hover:bg-rose-500/10 p-1.5 rounded-lg press"><Icon name="Trash2" size={16} /></button>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-white/10 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Discount %</label>
+              <input type="number" min="0" max="100" step="1" value={discIn} onChange={e => setDiscIn(e.target.value)} className={inp + ' mt-1'} />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Payment</label>
+              <div className="mt-1 grid grid-cols-2 gap-1 bg-white/5 rounded-xl p-1 border border-white/10">
+                {[['Cash', 'Banknote'], ['Card', 'CreditCard']].map(([m, ic]) => (
+                  <button key={m} aria-pressed={pay === m} onClick={() => setPay(m)}
+                    className={'flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-semibold transition press ' +
+                      (pay === m ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow' : 'text-slate-300')}>
+                    <Icon name={ic} size={13} />{m}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="space-y-1.5 text-sm">
+            <div className="flex justify-between text-slate-400"><span>Subtotal</span><span>{money(tot.subtotal)}</span></div>
+            <div className="flex justify-between text-slate-400"><span>Discount ({disc}%)</span><span className="text-rose-300">-{money(tot.discount)}</span></div>
+            <div className="flex justify-between text-slate-400"><span>Tax ({(TAX_RATE * 100).toFixed(0)}%)</span><span>{money(tot.tax)}</span></div>
+            <div className="flex justify-between items-end pt-2 border-t border-white/10">
+              <span className="font-semibold">Total</span>
+              <span className="text-2xl font-extrabold grad-text">{money(tot.total)}</span>
+            </div>
+          </div>
+          <button onClick={checkout} disabled={!lines.length}
+            className="w-full py-3.5 rounded-xl font-bold text-white bg-gradient-to-r from-emerald-500 to-teal-500 shadow-lg shadow-emerald-500/30 hover:brightness-110 press disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-2">
+            <Icon name="CircleCheck" size={18} />Process Payment
+          </button>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+/* ---------- Overlays ---------- */
+function SuccessFlash({ onDone }) {
+  useEffect(() => { const t = setTimeout(onDone, 1300); return () => clearTimeout(t); }, []);
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center pointer-events-none">
+      <div className="pop glass rounded-3xl p-8 text-center shadow-2xl shadow-emerald-500/30">
+        <div className="mx-auto w-20 h-20 rounded-full grid place-items-center bg-gradient-to-br from-emerald-400 to-teal-500 text-white mb-4">
+          <Icon name="CircleCheck" size={40} />
+        </div>
+        <div className="text-xl font-bold">Payment Successful</div>
+        <div className="text-slate-400 text-sm">Inventory updated and invoice saved</div>
+      </div>
+    </div>
+  );
+}
+
+function Receipt({ sale, onClose }) {
+  const row = (label, val, cls = '') => (
+    <div className={'flex justify-between ' + cls}><span>{label}</span><span>{val}</span></div>
+  );
+  return (
+    <div className="p-5">
+      <div className="print-area mono text-[12px] leading-relaxed bg-[#fbfbf6] text-slate-900 rounded-xl p-5">
+        <div className="text-center mb-2">
+          <div className="text-lg font-extrabold tracking-[0.3em]">NOVAPOS</div>
+          <div className="text-[11px]">Commerce Suite</div>
+        </div>
+        <div className="border-t border-dashed border-slate-400 my-3" />
+        <div>Invoice: <b>{sale.invoiceNo}</b></div>
+        <div>Date: {new Date(sale.date).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}</div>
+        <div>Payment: {sale.payment}</div>
+        <div className="border-t border-dashed border-slate-400 my-3" />
+        <div className="space-y-2">
+          {sale.items.map((it, i) => (
+            <div key={i}>
+              <div className="font-semibold">{it.name}</div>
+              <div className="flex justify-between text-[11px]"><span>{it.qty} x {money(it.price)}</span><span>{money(it.qty * it.price)}</span></div>
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-dashed border-slate-400 my-3" />
+        {row('Subtotal', money(sale.subtotal))}
+        {row('Discount (' + (sale.discountPct || 0) + '%)', '-' + money(sale.discount))}
+        {row('Tax (' + (TAX_RATE * 100).toFixed(0) + '%)', money(sale.tax))}
+        <div className="border-t border-slate-800 my-2" />
+        <div className="flex justify-between text-base font-bold"><span>TOTAL</span><span>{money(sale.total)}</span></div>
+        <div className="border-t border-dashed border-slate-400 my-3" />
+        <div className="text-center text-[11px]">Thank you for shopping with NovaPOS!</div>
+      </div>
+      <div className="no-print flex gap-3 mt-4">
+        <button onClick={() => window.print()} className={btnPrimary + ' flex-1 flex items-center justify-center gap-2'}>
+          <Icon name="Printer" size={16} />Print Receipt
+        </button>
+        <button onClick={onClose} className="px-4 py-2.5 rounded-xl font-semibold bg-white/10 hover:bg-white/15 press">Close</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Analytics ---------- */
+function Analytics({ products, sales }) {
+  const revenue = sales.reduce((s, x) => s + x.total, 0);
+  const invValue = products.reduce((s, p) => s + p.price * p.stock, 0);
+  const low = products.filter(p => p.stock <= LOW_STOCK).length;
+
+  const days = [...Array(7)].map((_, i) => {
+    const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (6 - i));
+    const key = d.toDateString();
+    const rev = sales.filter(s => new Date(s.date).toDateString() === key).reduce((a, s) => a + s.total, 0);
+    return { label: d.toLocaleDateString(undefined, { weekday: 'short' }), rev };
+  });
+  const max = Math.max(1, ...days.map(d => d.rev));
+
+  const topMap = {};
+  sales.forEach(s => s.items.forEach(i => {
+    const t = topMap[i.sku] || { name: i.name, qty: 0, rev: 0 };
+    t.qty += i.qty; t.rev += i.qty * i.price; topMap[i.sku] = t;
+  }));
+  const top = Object.values(topMap).sort((a, b) => b.qty - a.qty).slice(0, 5);
+  const topMax = Math.max(1, ...top.map(t => t.qty));
+
+  const kpis = [
+    { label: 'Total Revenue', value: revenue, prefix: '$', decimals: 2, icon: 'TrendingUp', grad: 'from-indigo-500 to-violet-500' },
+    { label: 'Total Sales', value: sales.length, icon: 'Receipt', grad: 'from-emerald-400 to-teal-500' },
+    { label: 'Inventory Value', value: invValue, prefix: '$', decimals: 2, icon: 'Wallet', grad: 'from-amber-400 to-orange-500' },
+    { label: 'Low Stock Items', value: low, icon: 'TriangleAlert', grad: 'from-rose-500 to-pink-600' }
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">Analytics <span className="grad-text">Dashboard</span></h1>
+        <p className="text-sm text-slate-400">Live performance across sales and inventory.</p>
+      </div>
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        {kpis.map((k, i) => (
+          <div key={k.label} className="glass rounded-2xl p-5 hover-lift fade-up" style={{ animationDelay: (i * 80) + 'ms' }}>
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-sm text-slate-400">{k.label}</span>
+              <div className={'w-10 h-10 rounded-xl grid place-items-center bg-gradient-to-br text-white shadow-lg ' + k.grad}><Icon name={k.icon} size={18} /></div>
+            </div>
+            <div className="text-2xl md:text-3xl font-extrabold"><CountUp value={k.value} prefix={k.prefix || ''} decimals={k.decimals || 0} /></div>
+          </div>
+        ))}
+      </div>
+      <div className="grid xl:grid-cols-[1.6fr_1fr] gap-6">
+        <div className="glass rounded-2xl p-5">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="font-bold">Revenue · Last 7 days</h2>
+            <Pill tone="indigo">Daily</Pill>
+          </div>
+          <div className="h-64 flex items-stretch gap-3">
+            {days.map((d, i) => (
+              <div key={i} className="flex-1 flex flex-col min-w-0">
+                <div className="text-[11px] text-slate-400 text-center mb-1 mono">{d.rev > 0 ? '$' + Math.round(d.rev) : ''}</div>
+                <div className="flex-1 flex items-end">
+                  <div className="w-full rounded-t-xl bg-gradient-to-t from-indigo-600 via-violet-500 to-cyan-300 grow shadow-lg shadow-indigo-500/20"
+                    style={{ height: Math.max(3, (d.rev / max) * 100) + '%', animationDelay: (i * 90) + 'ms' }} title={money(d.rev)} />
+                </div>
+                <div className="text-xs text-slate-400 text-center mt-2">{d.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="glass rounded-2xl p-5">
+          <h2 className="font-bold mb-5">Top Selling Products</h2>
+          <div className="space-y-4">
+            {top.length === 0 && <div className="text-slate-500 text-sm">No sales yet.</div>}
+            {top.map((t, i) => (
+              <div key={t.name}>
+                <div className="flex justify-between text-sm mb-1.5">
+                  <span className="font-semibold truncate pr-2">{i + 1}. {t.name}</span>
+                  <span className="text-slate-400 shrink-0">{t.qty} sold · {money(t.rev)}</span>
+                </div>
+                <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+                  <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 grow" style={{ width: (t.qty / topMax * 100) + '%', animationDelay: (i * 100) + 'ms' }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Inventory ---------- */
+function ProductForm({ initial, existing, onSave, onClose }) {
+  const [f, setF] = useState(initial
+    ? { name: initial.name, sku: initial.sku, category: initial.category, price: String(initial.price), stock: String(initial.stock), icon: initial.icon, badge: initial.badge || '' }
+    : { name: '', sku: '', category: 'Snacks', price: '', stock: '', icon: 'Package', badge: '' });
+  const [err, setErr] = useState('');
+  const set = (k, v) => setF(prev => ({ ...prev, [k]: v }));
+
+  const submit = e => {
+    e.preventDefault();
+    const price = Number(f.price);
+    const stock = Number(f.stock);
+    if (!f.name.trim()) return setErr('Name is required.');
+    if (!f.sku.trim()) return setErr('SKU is required.');
+    if (existing.some(p => p.sku.toLowerCase() === f.sku.trim().toLowerCase() && (!initial || p.id !== initial.id))) return setErr('That SKU already exists.');
+    if (f.price === '' || !(price >= 0)) return setErr('Enter a valid price.');
+    if (f.stock === '' || !Number.isInteger(stock) || stock < 0) return setErr('Stock must be a whole number, 0 or more.');
+    onSave({ id: initial ? initial.id : undefined, name: f.name.trim(), sku: f.sku.trim().toUpperCase(), category: f.category, price: r2(price), stock, icon: f.icon, badge: f.badge.trim() });
+  };
+
+  return (
+    <form onSubmit={submit} className="p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold">{initial ? 'Edit Product' : 'Add New Product'}</h2>
+        <button type="button" onClick={onClose} className={btnIcon}><Icon name="X" size={18} /></button>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="col-span-2">
+          <label className="text-xs text-slate-400 font-semibold">Product name</label>
+          <input className={inp + ' mt-1'} value={f.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Iced Tea" />
+        </div>
+        <div>
+          <label className="text-xs text-slate-400 font-semibold">SKU</label>
+          <input className={inp + ' mt-1 mono'} value={f.sku} onChange={e => set('sku', e.target.value)} placeholder="BEV-010" />
+        </div>
+        <div>
+          <label className="text-xs text-slate-400 font-semibold">Category</label>
+          <select className={inp + ' mt-1'} value={f.category} onChange={e => set('category', e.target.value)}>
+            {CATEGORIES.slice(1).map(c => <option key={c} className="bg-slate-900" value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-slate-400 font-semibold">Price ($)</label>
+          <input type="number" step="0.01" min="0" className={inp + ' mt-1'} value={f.price} onChange={e => set('price', e.target.value)} />
+        </div>
+        <div>
+          <label className="text-xs text-slate-400 font-semibold">Stock</label>
+          <input type="number" step="1" min="0" className={inp + ' mt-1'} value={f.stock} onChange={e => set('stock', e.target.value)} />
+        </div>
+        <div className="col-span-2">
+          <label className="text-xs text-slate-400 font-semibold">Badge (optional)</label>
+          <input className={inp + ' mt-1'} value={f.badge} onChange={e => set('badge', e.target.value)} placeholder="New, Hot, Bestseller..." />
+        </div>
+        <div className="col-span-2">
+          <label className="text-xs text-slate-400 font-semibold">Icon</label>
+          <div className="mt-1 grid grid-cols-8 gap-1.5">
+            {ICON_OPTIONS.map(ic => (
+              <button type="button" key={ic} onClick={() => set('icon', ic)} title={ic}
+                className={'grid place-items-center h-10 rounded-lg press transition ' + (f.icon === ic ? 'bg-gradient-to-br from-indigo-500 to-violet-500 text-white shadow-lg' : 'bg-white/5 text-slate-300 hover:bg-white/10')}>
+                <Icon name={ic} size={16} />
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      {err && <div className="text-sm text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2">{err}</div>}
+      <div className="flex gap-3 pt-2">
+        <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl font-semibold bg-white/10 hover:bg-white/15 press">Cancel</button>
+        <button type="submit" className={btnPrimary + ' flex-1'}>{initial ? 'Save Changes' : 'Add Product'}</button>
+      </div>
+    </form>
+  );
+}
+
+function Inventory({ products, setProducts, moves, recordMoves }) {
+  const [q, setQ] = useState('');
+  const [form, setForm] = useState(null);
+  const [confirmId, setConfirmId] = useState(null);
+
+  const list = products.filter(p => (p.name + ' ' + p.sku + ' ' + p.category).toLowerCase().includes(q.toLowerCase()));
+
+  const onSave = d => {
+    if (!d.id) {
+      const np = { ...d, id: uid() };
+      setProducts(prev => [np, ...prev]);
+      if (np.stock > 0) recordMoves([mk(np.name, np.sku, np.stock, 'Initial stock')]);
+    } else {
+      const old = products.find(x => x.id === d.id);
+      setProducts(prev => prev.map(x => x.id === d.id ? { ...x, ...d } : x));
+      if (old && old.stock !== d.stock) recordMoves([mk(d.name, d.sku, d.stock - old.stock, 'Manual adjustment')]);
+    }
+    setForm(null);
+  };
+
+  const remove = p => {
+    setProducts(prev => prev.filter(x => x.id !== p.id));
+    if (p.stock > 0) recordMoves([mk(p.name, p.sku, -p.stock, 'Product removed')]);
+    setConfirmId(null);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">Inventory <span className="grad-text">Manager</span></h1>
+          <p className="text-sm text-slate-400">{products.length} products · {products.filter(p => p.stock <= LOW_STOCK).length} need attention</p>
+        </div>
+        <div className="flex gap-3">
+          <div className="relative flex-1 sm:w-64">
+            <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search inventory" className={inp + ' pl-9'} />
+          </div>
+          <button onClick={() => setForm({ mode: 'new' })} className={btnPrimary + ' flex items-center gap-2 whitespace-nowrap'}>
+            <Icon name="Plus" size={16} />Add
+          </button>
+        </div>
+      </div>
+
+      <div className="glass rounded-2xl overflow-x-auto scroll-thin">
+        <table className="w-full text-sm min-w-[720px]">
+          <thead>
+            <tr className="text-left text-xs uppercase tracking-wider text-slate-400 border-b border-white/10">
+              <th className="px-5 py-3 font-semibold">Product</th>
+              <th className="px-3 py-3 font-semibold">Category</th>
+              <th className="px-3 py-3 font-semibold text-right">Price</th>
+              <th className="px-3 py-3 font-semibold text-right">Stock</th>
+              <th className="px-3 py-3 font-semibold">Status</th>
+              <th className="px-5 py-3 font-semibold text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map(p => (
+              <tr key={p.id} className="border-b border-white/5 hover:bg-white/[0.03] transition">
+                <td className="px-5 py-3">
+                  <div className="flex items-center gap-3">
+                    <Tile icon={p.icon} cat={p.category} small />
+                    <div>
+                      <div className="font-semibold">{p.name}</div>
+                      <div className="text-[11px] text-slate-500 mono">{p.sku}</div>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-3 py-3 text-slate-300">{p.category}</td>
+                <td className="px-3 py-3 text-right font-semibold">{money(p.price)}</td>
+                <td className="px-3 py-3 text-right font-bold">{p.stock}</td>
+                <td className="px-3 py-3"><Pill tone={stockTone(p.stock)}>{stockLabel(p.stock)}</Pill></td>
+                <td className="px-5 py-3">
+                  {confirmId === p.id ? (
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => remove(p)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-500 text-white press">Delete</button>
+                      <button onClick={() => setConfirmId(null)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 press">Cancel</button>
+                    </div>
+                  ) : (
+                    <div className="flex justify-end gap-1">
+                      <button onClick={() => setForm({ mode: 'edit', data: p })} className={btnIcon} title="Edit"><Icon name="Pencil" size={16} /></button>
+                      <button onClick={() => setConfirmId(p.id)} className={btnIcon + ' hover:!text-rose-300'} title="Delete"><Icon name="Trash2" size={16} /></button>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {list.length === 0 && <div className="p-10 text-center text-slate-400">No products found.</div>}
+      </div>
+
+      <div className="glass rounded-2xl p-5">
+        <h2 className="font-bold mb-4 flex items-center gap-2"><Icon name="History" size={16} className="text-indigo-300" />Recent stock movements</h2>
+        {moves.length === 0 && <div className="text-sm text-slate-500">No stock changes recorded yet.</div>}
+        <div className="space-y-2 max-h-64 overflow-y-auto scroll-thin pr-1">
+          {moves.slice(0, 12).map(m => (
+            <div key={m.id} className="fade-up flex items-center justify-between gap-3 text-sm py-2 px-3 rounded-xl bg-white/[0.03] border border-white/5">
+              <div className="min-w-0">
+                <div className="font-semibold truncate">{m.product} <span className="text-slate-500 mono text-[11px]">{m.sku}</span></div>
+                <div className="text-xs text-slate-400">{m.reason} · {new Date(m.date).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}</div>
+              </div>
+              <span className={'font-bold mono ' + (m.delta < 0 ? 'text-rose-300' : 'text-emerald-300')}>{m.delta > 0 ? '+' : ''}{m.delta}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {form && (
+        <Modal onClose={() => setForm(null)} width="max-w-lg">
+          <ProductForm initial={form.mode === 'edit' ? form.data : null} existing={products} onSave={onSave} onClose={() => setForm(null)} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Sales history ---------- */
+function History({ sales, onView }) {
+  const [q, setQ] = useState('');
+  const list = sales.filter(s => s.invoiceNo.toLowerCase().includes(q.toLowerCase()));
+  const total = list.reduce((s, x) => s + x.total, 0);
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">Sales & <span className="grad-text">Invoices</span></h1>
+          <p className="text-sm text-slate-400">{list.length} transactions · {money(total)} total</p>
+        </div>
+        <div className="relative sm:w-72">
+          <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search invoice number" className={inp + ' pl-9'} />
+        </div>
+      </div>
+      <div className="glass rounded-2xl overflow-x-auto scroll-thin">
+        <table className="w-full text-sm min-w-[680px]">
+          <thead>
+            <tr className="text-left text-xs uppercase tracking-wider text-slate-400 border-b border-white/10">
+              <th className="px-5 py-3 font-semibold">Invoice</th>
+              <th className="px-3 py-3 font-semibold">Date & time</th>
+              <th className="px-3 py-3 font-semibold text-center">Items</th>
+              <th className="px-3 py-3 font-semibold">Payment</th>
+              <th className="px-3 py-3 font-semibold text-right">Total</th>
+              <th className="px-5 py-3 font-semibold text-right">Receipt</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map(s => (
+              <tr key={s.id} className="fade-up border-b border-white/5 hover:bg-white/[0.03] transition">
+                <td className="px-5 py-3 mono font-semibold text-indigo-200">{s.invoiceNo}</td>
+                <td className="px-3 py-3 text-slate-300">{new Date(s.date).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</td>
+                <td className="px-3 py-3 text-center">{s.items.reduce((a, i) => a + i.qty, 0)}</td>
+                <td className="px-3 py-3"><Pill tone={s.payment === 'Cash' ? 'green' : 'indigo'}>{s.payment}</Pill></td>
+                <td className="px-3 py-3 text-right font-bold">{money(s.total)}</td>
+                <td className="px-5 py-3 text-right">
+                  <button onClick={() => onView(s)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 hover:bg-indigo-500/30 press transition">
+                    <Icon name="Receipt" size={14} />View Receipt
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {list.length === 0 && <div className="p-10 text-center text-slate-400">No invoices match your search.</div>}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- App shell ---------- */
+function App() {
+  const [products, setProducts] = useState(() => asArr(loadKey(KEYS.products, null), SEED_PRODUCTS));
+  const [sales, setSales] = useState(() => asArr(loadKey(KEYS.sales, null), null) || seedSales());
+  const [moves, setMoves] = useState(() => asArr(loadKey(KEYS.moves, []), []));
+  const [view, setView] = useState('pos');
+  const [receipt, setReceipt] = useState(null);
+  const [flash, setFlash] = useState(false);
+
+  useEffect(() => { saveKey(KEYS.products, products); }, [products]);
+  useEffect(() => { saveKey(KEYS.sales, sales); }, [sales]);
+  useEffect(() => { saveKey(KEYS.moves, moves); }, [moves]);
+
+  const recordMoves = list => setMoves(prev => [...list, ...prev].slice(0, 300));
+
+  const handleCheckout = payload => {
+    const sale = {
+      id: uid(),
+      invoiceNo: 'NV-' + (1001 + sales.length),
+      date: new Date().toISOString(),
+      items: payload.items,
+      discountPct: payload.discountPct,
+      payment: payload.payment,
+      ...payload.totals
+    };
+    setSales(prev => [sale, ...prev]);
+    setProducts(prev => prev.map(p => {
+      const it = payload.items.find(i => i.id === p.id);
+      return it ? { ...p, stock: Math.max(0, p.stock - it.qty) } : p;
+    }));
+    recordMoves(payload.items.map(i => mk(i.name, i.sku, -i.qty, 'Sale ' + sale.invoiceNo)));
+    setReceipt(sale);
+    setFlash(true);
+  };
+
+  const nav = [
+    { id: 'pos', label: 'POS Terminal' }
+  ];
+
+  return (
+    <div className="min-h-screen relative">
+      <div className="blob" style={{ width: 520, height: 520, top: -140, left: -120, background: '#6366f1' }} />
+      <div className="blob" style={{ width: 440, height: 440, bottom: -120, right: -100, background: '#10b981' }} />
+      <div className="blob" style={{ width: 360, height: 360, top: '40%', left: '45%', background: '#f59e0b', opacity: 0.18 }} />
+      <div className="relative z-10 md:flex min-h-screen">
+        <Sidebar view={view} setView={setView} />
+        <main className="flex-1 min-w-0 p-4 md:p-8 fade-up">
+          {view === 'pos' && <POS products={products} onCheckout={handleCheckout} />}
+          {view === 'analytics' && <Analytics products={products} sales={sales} />}
+          {view === 'inventory' && <Inventory products={products} setProducts={setProducts} moves={moves} recordMoves={recordMoves} />}
+          {view === 'history' && <History sales={sales} onView={setReceipt} />}
+        </main>
+      </div>
+      {flash && <SuccessFlash onDone={() => setFlash(false)} />}
+      {receipt && !flash && (
+        <Modal onClose={() => setReceipt(null)} width="max-w-sm">
+          <Receipt sale={receipt} onClose={() => setReceipt(null)} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err: err }; }
+  componentDidCatch(err) { console.error('NovaPOS render error:', err); }
+  render() {
+    if (this.state.err) {
+      return <pre style={{ padding: 24, whiteSpace: 'pre-wrap', color: '#fda4af', font: '13px monospace' }}>{'NovaPOS render error: ' + String(this.state.err && this.state.err.message)}</pre>;
+    }
+    return this.props.children;
+  }
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<ErrorBoundary><App /></ErrorBoundary>);
+</script>
+</body>
+</html>
